@@ -40,11 +40,11 @@ We notice that there are only one sentenses that are longer than 100 words in in
 
 Let’s compare some famous extroverted and introverted presidents’ words. Do you think an extroverted president is more likely to use positive emotion words, and an introverted president is more likely to use rational or negative emotion words?
 
-###Donald J Trump v.s. Thomas Jefferson
+### Donald J Trump v.s. Thomas Jefferson
 
 ![image](figs/wordcloud_trump_jefferson.png)
 
-###William J Clinton v.s. Abraham Lincoln
+### William J Clinton v.s. Abraham Lincoln
 
 ![image](figs/wordcloud_Clinton_Lincoln.png)
 
