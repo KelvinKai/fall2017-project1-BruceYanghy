@@ -57,7 +57,7 @@ In the sentiment analysis part, we want to measure what is the proportion of the
 
 We can see that Donald Trump (extroverted) has more positive words than Thomas Jefferson (introverted), and William Clinton (extroverted) has more positive words than Thomas Jefferson (Abraham Lincoln).
 
-Compare of extroverted/introverted presidents’ emotions in general
+### Compare of extroverted/introverted presidents’ emotions in general
 
 ![image](figs/barchart_emotions.png)
 
@@ -65,7 +65,7 @@ It seems they have little difference over using the positive and negative words.
 
 What about under some pressure like an economic recession? What are the most used terms in an economic recession?
 
-Compare of extroverted/introverted presidents’ emotions under economic recession
+### Compare of extroverted/introverted presidents’ emotions under economic recession
 
 
 ![image](figs/barchart_recession.png)
