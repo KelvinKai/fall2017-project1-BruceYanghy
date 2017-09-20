@@ -40,20 +40,27 @@ We notice that there are only one sentenses that are longer than 100 words in in
 
 Let’s compare some famous extroverted and introverted presidents’ words. Do you think an extroverted president is more likely to use positive emotion words, and an introverted president is more likely to use rational or negative emotion words?
 
-Donald J Trump v.s. Thomas Jefferson
+###Donald J Trump v.s. Thomas Jefferson
+
 ![image](figs/wordcloud_trump_jefferson.png)
-William J Clinton v.s. Abraham Lincoln
+
+###William J Clinton v.s. Abraham Lincoln
+
 ![image](figs/wordcloud_Clinton_Lincoln.png)
+
 
 
 ## Sentiment Analysis of Inauguration speeches
 In the sentiment analysis part, we want to measure what is the proportion of the sentiment was positive or negative during the whole speech process.
+
 ![image](figs/piechart.png)
+
 We can see that Donald Trump (extroverted) has more positive words than Thomas Jefferson (introverted), and William Clinton (extroverted) has more positive words than Thomas Jefferson (Abraham Lincoln).
 
 Compare of extroverted/introverted presidents’ emotions in general
 
 ![image](figs/barchart_emotions.png)
+
 It seems they have little difference over using the positive and negative words.
 
 What about under some pressure like an economic recession? What are the most used terms in an economic recession?
@@ -66,6 +73,7 @@ Compare of extroverted/introverted presidents’ emotions under economic recessi
  Extroverted presidents put fear before joy under economic recession. That may suggest an extroverted person like to motative or influence people when there is a pressure.
  
 ## Topic modeling for extroverted presidents during economic recession.
+
  ![image](figs/words_used.png)
  
  The most common words that extroverted president used during an economic recession.
