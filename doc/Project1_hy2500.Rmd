@@ -1,0 +1,676 @@
+---
+title: "Project1_presidents_inauguation"
+author: "Hongyang Yang-hy2500"
+date: "September 19, 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+# Section 0: check and install needed packages. Load the libraries and functions. 
+
+```{r, message=FALSE, warning=FALSE}
+#packages.used=c("rvest", "tibble", "qdap", 
+#                "sentimentr", "gplots", "dplyr",
+#                "tm", "syuzhet", "factoextra", 
+#                "beeswarm", "scales", "RColorBrewer",
+#                "RANN", "tm", "topicmodels","wordcloud",
+#                "RColorBrewer","tydytext")
+
+# check packages that need to be installed.
+#packages.needed=setdiff(packages.used, 
+#                        intersect(installed.packages()[,1], 
+#                                  packages.used))
+# install additional packages
+#if(length(packages.needed)>0){
+#  install.packages(packages.needed, dependencies = TRUE)
+#}
+
+
+library(wordcloud)
+library(RColorBrewer)
+library(dplyr)
+library(tidytext)
+
+# load packages
+library("rvest")
+library("tibble")
+library("qdap")
+library("sentimentr")
+library("gplots")
+library("dplyr")
+library("tm")
+library("syuzhet")
+library("factoextra")
+library("beeswarm")
+library("scales")
+library("RColorBrewer")
+library("RANN")
+library("tm")
+library("topicmodels")
+library("wordcloud")
+library("RColorBrewer")
+library("tidytext")
+
+library("SnowballC")
+library("wordnet")
+library("ggplot2")
+library("qdap")
+library("NLP")
+library("openNLP")
+library("cluster")   
+library("fpc")
+
+
+source("../lib/plotstacked.R")
+source("../lib/speechFuncs.R")
+```
+This notebook was prepared with the following environmental settings.
+
+```{r}
+print(R.version)
+```
+
+# Section 1: Data Prepreation
+
+## Step 1: scrap speech URLs from <http://www.presidency.ucsb.edu/>.
+
+Following the example of [Jerid Francom](http://francojc.github.io/web-scraping-with-rvest/), we used [Selectorgadget](http://selectorgadget.com/) to choose the links we would like to scrap. For this project, we selected all inaugural addresses of past presidents
+
+```{r, message=FALSE, warning=FALSE}
+### Inauguaral speeches
+main.page <- read_html(x = "http://www.presidency.ucsb.edu/inaugurals.php")
+# Get link URLs
+# f.speechlinks is a function for extracting links from the list of speeches. 
+inaug=f.speechlinks(main.page)
+#head(inaug)
+as.Date(inaug[,1], format="%B %e, %Y")
+inaug=inaug[-nrow(inaug),] # remove the last line, irrelevant due to error.
+
+```
+
+## Step 2: Using speech metadata posted on <http://www.presidency.ucsb.edu/>, we prepared CSV data sets for the speeches we will scrap. 
+
+```{r}
+inaug.list=read.csv("../data/inauglist.csv", stringsAsFactors = FALSE)
+```
+
+## Step 3: we prepared CSV data sets for presidents' perosnality, education background, and economic recession. 
+<http://thesixteentypes.tumblr.com/post/60372674743/personality-types-of-all-us-presidents>
+<https://en.wikipedia.org/wiki/List_of_recessions_in_the_United_States#Great_Depression_onward>
+
+If the president is introverted dominated set the personality to -1, extroverted dominated set the personality to 1. for example, Barack Obama is ENFP-Extraversion (E), Intuition (N), Thinking (T), Perception (P), that means he has an extroverted dominated personality.
+
+If the inaugral speech happened during an economic recession, set the recession to 1. for example, the 2008 financial crisis happened during Dec 2007 – June 2009, Barack Obama delivered his 1st term inaugural speech on Jan, 2009. So his inaugural speech happened during an economic recession.
+
+If the presidents get any real threat assasination attempt.
+
+
+```{r}
+personality_info=read.csv("../data/personality_info.csv", stringsAsFactors = FALSE,header=TRUE)
+
+
+personality=personality_info$Personality
+recession=personality_info$Recession
+
+inaug.list=cbind(inaug.list,personality,recession)
+
+```
+
+
+We assemble all scrapped speeches into one list. Note here that we don't have the full text yet, only the links to full text transcripts. 
+
+## Step 4: scrap the texts of speeches from the speech URLs.
+
+```{r}
+inaug.list$type=c(rep("inaug", nrow(inaug.list)))
+inaug.list=cbind(inaug.list, inaug)
+```
+
+
+
+Based on the list of speeches, we scrap the main text part of the transcript's html page. For simple html pages of this kind,  [Selectorgadget](http://selectorgadget.com/) is very convenient for identifying the html node that `rvest` can use to scrap its content. For reproducibility, we also save our scrapped speeches into our local folder as individual speech files. 
+
+```{r}
+# Loop over each row in speech.list
+inaug.list$fulltext=NA
+for(i in seq(nrow(inaug.list))) {
+  text <- read_html(inaug.list$urls[i]) %>% # load the page
+    html_nodes(".displaytext") %>% # isloate the text
+    html_text() # get the text
+  inaug.list$fulltext[i]=text
+  # Create the file name
+  filename <- paste0("../data/fulltext/", 
+                     inaug.list$type[i],
+                     inaug.list$File[i], "-", 
+                     inaug.list$Term[i], ".txt")
+  sink(file = filename) %>% # open file to write 
+  cat(text)  # write the file
+  sink() # close the file
+}
+```
+
+
+## Step 5: data Processing --- generate list of sentences
+
+We will use sentences as units of analysis for this project, as sentences are natural languge units for organizing thoughts and ideas. For each extracted sentence, we apply sentiment analysis using [NRC sentiment lexion](http://saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm). "The NRC Emotion Lexicon is a list of English words and their associations with eight basic emotions (anger, fear, anticipation, trust, surprise, sadness, joy, and disgust) and two sentiments (negative and positive). The annotations were manually done by crowdsourcing."
+
+We assign an sequential id to each sentence in a speech (`sent.id`) and also calculated the number of words in each sentence as *sentence length* (`word.count`).
+
+```{r, message=FALSE, warning=FALSE}
+sentence.list=NULL
+for(i in 1:nrow(inaug.list)){
+  sentences=sent_detect(inaug.list$fulltext[i],
+                        endmarks = c("?", ".", "!", "|",";"))
+  if(length(sentences)>0){
+    emotions=get_nrc_sentiment(sentences)
+    word.count=word_count(sentences)
+    # colnames(emotions)=paste0("emo.", colnames(emotions))
+    # in case the word counts are zeros?
+    emotions=diag(1/(word.count+0.01))%*%as.matrix(emotions)
+    sentence.list=rbind(sentence.list, 
+                        cbind(inaug.list[i,-ncol(inaug.list)],
+                              sentences=as.character(sentences), 
+                              word.count,
+                              emotions,
+                              sent.id=1:length(sentences)
+                              )
+    )
+  }
+}
+```
+
+Some non-sentences exist in raw data due to erroneous extra end-of sentence marks. 
+```{r}
+sentence.list=
+  sentence.list%>%
+  filter(!is.na(word.count)) 
+
+```
+
+
+
+# Section 2:  What words can Presidents' personality tell us?
+
+## Words/Sentenses analysis
+First, let's calculate extroverted v.s. introverted total sentenses, total words, and average words per sentenses
+
+```{r, message=FALSE, warning=FALSE}
+extroverted_list=sentence.list[sentence.list$personality==1,]
+introverted_list=sentence.list[sentence.list$personality==-1,]
+
+# number of sentences
+extrovreted_sentenses<-tapply(extroverted_list$sentences, extroverted_list$File, length)
+ # average words per sentence
+extrovreted_average_words<-round(tapply(extroverted_list$word.count, extroverted_list$File, mean),0)
+extrovreted_words<-tapply(extroverted_list$word.count, extroverted_list$File, sum)
+extrovreted_count<-data.frame(extrovreted_sentenses, extrovreted_average_words, extrovreted_words)
+
+introverted_sentenses<-tapply(introverted_list$sentences, introverted_list$File, length)
+ # average words per sentence
+introverted_average_words<-round(tapply(introverted_list$word.count, introverted_list$File, mean),0)
+introverted_words<-tapply(introverted_list$word.count, introverted_list$File, sum)
+introverted_count<-data.frame(introverted_sentenses, introverted_average_words, introverted_words)
+
+
+e=colMeans(extrovreted_count)
+i=colMeans(introverted_count)
+dt=matrix(c(rep("extrovreted",3),rep("introverted",3)),nrow=6,ncol=1)
+total_sentenses=e[[1]]+i[[1]]
+total_words=e[[3]]+i[[3]]
+total_avg_words=e[[2]]+i[[2]]
+
+dt=as.data.frame(dt)
+colnames(dt)<-"Compare"
+dt$var<-c(rep(c("Total Sentenses%","Total Words%","Average Words per sentense%"),2))
+dt$value<-c(e[[1]]/total_sentenses,e[[3]]/total_words,e[[2]]/total_avg_words
+            ,i[[1]]/total_sentenses,i[[3]]/total_words,i[[2]]/total_avg_words)
+
+#png('../figs/Compare.png')
+ggplot(dt, aes(x = var, y = value, fill = Compare))+ 
+   geom_bar(stat="identity", position=position_dodge())
+#dev.off()
+
+
+
+```
+We can briefly conclude that an extroverted personality dominated president is more talkative than an introverted personality dominated president.
+
+## Clustering analysis
+
+Second,  extroverted people are usually easy to identify and compare, so let's use Kmeans to cluster extroverted presidents' speeches to see if any presidents have the same talking style.
+```{r}
+#extroverted
+presid.summary=tbl_df(extroverted_list)%>%
+  #filter(File%in%sentence.list[sentence.list$personality==1,])%>%
+  #group_by(paste0(type, File))%>%
+  group_by(File)%>%
+  summarise(
+    anger=mean(anger),
+    anticipation=mean(anticipation),
+    disgust=mean(disgust),
+    fear=mean(fear),
+    joy=mean(joy),
+    sadness=mean(sadness),
+    surprise=mean(surprise),
+    trust=mean(trust)
+    #negative=mean(negative),
+    #positive=mean(positive)
+  )
+
+presid.summary=as.data.frame(presid.summary)
+rownames(presid.summary)=as.character((presid.summary[,1]))
+km.res=kmeans(presid.summary[,-1], iter.max=200,
+              6)
+#png('../figs/fviz_cluster.png')
+fviz_cluster(km.res, 
+             stand=F, repel= TRUE,
+             data = presid.summary[,-1], xlab="", xaxt="n",
+             show.clust.cent=FALSE)
+```
+I would say that Donald Trump and Richard Nixon have the same talking style, they are common in their ambition, Paranoia, and Media Distrust. They are both alpha male, have strange behavior and unwelcomed by most people.
+
+Barack Obama and Ronald Reagan have a lot in common. Their personality are both attractive, they like to encourage people and tell jokes, their speeches are really impressive and influencial.
+
+## Visualize president's sentense
+
+We notice that the sentences in inaugural speeches are longer than those in nomination acceptance speeches. 
+
+```{r, message=FALSE, warning=FALSE}
+extroverted_list$File=factor(extroverted_list$File)
+extroverted_list$FileOrdered=reorder(extroverted_list$File, 
+                                  extroverted_list$word.count, 
+                                  mean, 
+                                  order=T)
+
+#png('../figs/beeswarm_extroverted.png')
+
+beeswarm(word.count~FileOrdered, 
+         data=extroverted_list,
+         horizontal = TRUE,
+         pch=16, col=alpha(brewer.pal(9, "Set1"), 0.6), 
+         cex=0.55, cex.axis=0.8, cex.lab=0.8,
+         spacing=5/nlevels(extroverted_list$FileOrdered),
+         las=2, ylab="", xlab="Number of words in a sentence.",
+         main="Extroverted Presidents' Speeches")
+
+
+```
+```{r, message=FALSE, warning=FALSE}
+
+introverted_list$File=factor(introverted_list$File)
+introverted_list$FileOrdered=reorder(introverted_list$File, 
+                                  introverted_list$word.count, 
+                                  mean, 
+                                  order=T)
+#png('../figs/beeswarm_introverted.png')
+
+beeswarm(word.count~FileOrdered, 
+         data=introverted_list,
+         horizontal = TRUE,
+         pch=16, col=alpha(brewer.pal(9, "Set1"), 0.6), 
+         cex=0.55, cex.axis=0.8, cex.lab=0.8,
+         spacing=5/nlevels(introverted_list$FileOrdered),
+         las=2, ylab="", xlab="Number of words in a sentence.",
+         main="Introverted Presidents' Speeches")
+
+```
+We notice that there are only one sentenses that are longer than 100 words in introverted presidents' speeches, but there are few sentenses that are longer than 100 words in extrovered presidents' speeches. 
+
+
+
+## What words did extroverted/introverted Presidents say?
+```{r}
+folder.path="../data/fulltext/"
+speeches=list.files(path = folder.path, pattern = "*.txt")
+
+#only get inaugural speeches
+speeches=speeches[substr(speeches, 1, 5)=='inaug']
+
+prez.out=substr(speeches, 6, nchar(speeches)-4)
+
+introverted_index=NULL
+speeches.president=substr(speeches, 6, nchar(speeches)-6)
+
+
+#length.speeches=rep(NA, length(speeches))
+ff.all<-Corpus(DirSource(folder.path,encoding="UTF-8"))
+ff.all<-tm_map(ff.all, stripWhitespace)
+ff.all<-tm_map(ff.all, content_transformer(tolower))
+ff.all<-tm_map(ff.all, removeWords, stopwords("english"))
+ff.all<-tm_map(ff.all, removeWords, character(0))
+ff.all<-tm_map(ff.all, removePunctuation)
+
+dtm <- DocumentTermMatrix(ff.all,
+                          control = list(weighting =
+                                           function(x)
+                                             weightTfIdf(x, normalize =
+                                                           FALSE),
+                                         stopwords = TRUE))
+ff.dtm=tidy(dtm)
+
+#tdm.overall=summarise(group_by(tdm.tidy, term), sum(count))
+```
+
+```{r}
+#match speeches to personality
+personality.list=data.frame(File=inaug.list$File,Term=inaug.list$Term,personality=inaug.list$personality)
+
+speeches.personality=cbind(personality.list[order(personality.list$File),],prez.out)
+
+personality.index=which(speeches.personality$personality==1)
+```
+
+Let's compare some famous extroverted and introverted presidents' words. Do you think an extroverted president is more likely to use positive emotion words, and an introverted president is more likely to use rational or negative emotion words?
+
+```{r, echo=FALSE, fig.height=7, fig.width=7, message=FALSE, warning=FALSE,fig.align='center'}
+
+#png('../figs/wordcloud_trump_jefferson.png')
+
+par(mfrow=c(1,2))
+#extraverted: Donald J Trump
+
+wordcloud(ff.dtm$term[ff.dtm$document==speeches[9]],
+          ff.dtm$count[ff.dtm$document==speeches[9]],
+          scale=c(3,0.5),
+          max.words=200,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.1,
+          use.r.layout=FALSE,
+          random.color=FALSE,
+          colors=brewer.pal(10,"Reds"), 
+          main=prez.out[10])
+
+#introverted: Thomas Jefferson
+wordcloud(ff.dtm$term[ff.dtm$document==speeches[c(45,46)]],
+          ff.dtm$count[ff.dtm$document==speeches[c(45,46)]],
+          scale=c(3,0.5),
+          max.words=200,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.1,
+          use.r.layout=FALSE,
+          random.color=FALSE,
+          colors=brewer.pal(10,"Reds"), 
+          main=prez.out[10])
+
+
+```
+```{r, echo=FALSE, fig.height=7, fig.width=7, message=FALSE, warning=FALSE,fig.align='center'}
+
+
+#png('../figs/wordcloud_Clinton_Lincoln.png')
+
+par(mfrow=c(1,2))
+#extraverted: William J Clinton
+
+wordcloud(ff.dtm$term[ff.dtm$document==speeches[c(52,53)]],
+          ff.dtm$count[ff.dtm$document==speeches[c(52,53)]],
+          scale=c(3,0.5),
+          max.words=200,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.1,
+          use.r.layout=FALSE,
+          random.color=FALSE,
+          colors=brewer.pal(10,"Reds"), 
+          main=prez.out[10])
+#introverted:  Abraham Lincoln
+wordcloud(ff.dtm$term[ff.dtm$document==speeches[c(1,2)]],
+          ff.dtm$count[ff.dtm$document==speeches[c(1,2)]],
+          scale=c(3,0.5),
+          max.words=200,
+          min.freq=1,
+          random.order=FALSE,
+          rot.per=0.1,
+          use.r.layout=FALSE,
+          random.color=FALSE,
+          colors=brewer.pal(10,"Reds"), 
+          main=prez.out[3])
+
+```
+
+
+## Sentiment Analysis of Inauguration speeches
+```{r sentiment, include=FALSE}
+sent.plot=function(In_list, In_File){
+  In_list=In_list[In_list$File==In_File,]
+  In_list$topemotion=apply(select(In_list, 
+                                  negative:positive), 
+                                  1, which.max)
+  In_list$topemotion.v=apply(select(In_list,
+                                    negative:positive), 
+                                    1, max)
+  table=(tapply(In_list$topemotion.v,In_list$topemotion,sum))
+
+    lbls=c("negative","positive")
+  pie(table,labels = lbls, col=c('red',"green"),
+      main=In_File)
+
+ 
+}
+```
+
+In the sentiment analysis part, we want to measure what is the proportion of the sentiment was positive or negative during the whole speech process.
+
+```{r, echo=FALSE, fig.height=5, fig.width=10, message=FALSE, warning=FALSE}
+#png('../figs/piechart.png')
+
+par(mfrow=c(2,2))
+sent.plot(extroverted_list, "DonaldJTrump")
+sent.plot(introverted_list, "ThomasJefferson")
+sent.plot(extroverted_list, "FranklinDRoosevelt")
+sent.plot(introverted_list, "AbrahamLincoln")
+
+
+```
+We can see that Donald Trump (extroverted) has more positive words than Thomas Jefferson (introverted), and William Clinton (extroverted) has more positive words than Thomas Jefferson (Abraham Lincoln). 
+
+## Compare of extroverted/introverted presidents' emotions in general
+```{r}
+#png('../figs/barchart_emotions.png')
+
+par(mfrow=c(1,2))
+
+par(mar=c(4, 6, 2, 1))
+extroverted_emo.means=colMeans(select(extroverted_list, anger:trust)>0.01)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(extroverted_emo.means[order(extroverted_emo.means)], las=2, col=col.use[order(extroverted_emo.means)], horiz=T, main="Extroverted Speeches")
+
+introverted_emo.means=colMeans(select(introverted_list, anger:trust)>0.0)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(introverted_emo.means[order(introverted_emo.means)], las=2, col=col.use[order(introverted_emo.means)], horiz=T, main="Introverted Speeches")
+
+```
+
+
+It seems they have little difference over using the positive and negative words. 
+
+What about under some pressure like an economic recession?
+
+What are the most used terms in an economic recession? 
+
+
+## Compare of extroverted/introverted presidents' emotions under economic recession
+
+```{r, message=FALSE, warning=FALSE}
+extroverted_recession=sentence.list[sentence.list$personality==1&sentence.list$recession==1,]
+introverted_recession=sentence.list[sentence.list$personality==-1&sentence.list$recession==1,]
+
+```
+
+```{r}
+#png('../figs/barchart_emotions.png')
+
+par(mfrow=c(1,2))
+
+par(mar=c(4, 6, 2, 1))
+extroverted_emo.means=colMeans(select(extroverted_recession, anger:trust)>0.01)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(extroverted_emo.means[order(extroverted_emo.means)], las=2, col=col.use[order(extroverted_emo.means)], horiz=T, main="Extroverted Speeches")
+
+introverted_emo.means=colMeans(select(introverted_recession, anger:trust)>0.01)
+col.use=c("red2", "darkgoldenrod1", 
+            "chartreuse3", "blueviolet",
+            "darkgoldenrod2", "dodgerblue3", 
+            "darkgoldenrod1", "darkgoldenrod1")
+barplot(introverted_emo.means[order(introverted_emo.means)], las=2, col=col.use[order(introverted_emo.means)], horiz=T, main="Introverted Speeches")
+
+```
+Extroverted presidents put fear before joy under economic recession. That may suggest an extroverted person like to motative or influence people when there is a pressure.
+
+
+
+# Section 3: Topic modeling for extroverted presidents during economic recession.
+
+## Extroverted presidents in recession
+
+For topic modeling, we prepare a corpus of sentence snipets as follows. For each speech, we start with sentences and prepare a snipet with a given sentence with the flanking sentences. 
+
+```{r}
+corpus.list=extroverted_recession[2:(nrow(extroverted_recession)-1), ]
+sentence.pre=extroverted_recession$sentences[1:(nrow(extroverted_recession)-2)]
+sentence.post=extroverted_recession$sentences[3:(nrow(extroverted_recession)-1)]
+corpus.list$snipets=paste(sentence.pre, corpus.list$sentences, sentence.post, sep=" ")
+rm.rows=(1:nrow(corpus.list))[corpus.list$sent.id==1]
+rm.rows=c(rm.rows, rm.rows-1)
+corpus.list=corpus.list[-rm.rows, ]
+```
+
+### Text mining
+```{r}
+docs <- Corpus(VectorSource(corpus.list$snipets))
+writeLines(as.character(docs[[sample(1:nrow(corpus.list), 1)]]))
+```
+
+### Text basic processing
+Adapted from <https://eight2late.wordpress.com/2015/09/29/a-gentle-introduction-to-topic-modeling-using-r/>.
+
+```{r}
+#remove potentially problematic symbols
+docs <-tm_map(docs,content_transformer(tolower))
+
+#remove punctuation
+docs <- tm_map(docs, removePunctuation)
+
+#Strip digits
+docs <- tm_map(docs, removeNumbers)
+
+#remove stopwords
+docs <- tm_map(docs, removeWords, stopwords("english"))
+
+meaningless <- c("all","can","say","one","way","use","also","howev","tell","will"
+                ,"much","need","take","tend","even","like","particular","rather","said","get"
+                ,"well","make","ask","come","end","first","two","often","may","might",
+                "see","someth","thing","point","post","look","right","now","think","anoth","yes",
+                "day","quit","sinc","attempt","bit","entir","lot","must","shall","from","are","its","not",
+                "our","that","the","their","this","which","with")
+docs <- tm_map(docs, removeWords, meaningless)
+
+#remove whitespace
+docs <- tm_map(docs, stripWhitespace)
+
+#Stem document
+docs <- tm_map(docs,stemDocument)
+```
+
+### Topic modeling
+
+Gengerate document-term matrices. 
+
+```{r}
+dtm <- DocumentTermMatrix(docs)
+#convert rownames to filenames#convert rownames to filenames
+rownames(dtm) <- paste(corpus.list$type, corpus.list$File,
+                       corpus.list$Term, corpus.list$sent.id, sep="_")
+
+rowTotals <- apply(dtm , 1, sum) #Find the sum of words in each Document
+
+dtm  <- dtm[rowTotals> 0, ]
+corpus.list=corpus.list[rowTotals>0, ]
+
+```
+
+###Run LDA
+
+```{r}
+#Set parameters for Gibbs sampling
+burnin <- 4000
+iter <- 2000
+thin <- 500
+seed <-list(2003,5,63,100001,765)
+nstart <- 5
+best <- TRUE
+
+#Number of topics
+k <- 15
+
+#Run LDA using Gibbs sampling
+ldaOut <-LDA(dtm, k, method="Gibbs", control=list(nstart=nstart, 
+                                                 seed = seed, best=best,
+                                                 burnin = burnin, iter = iter, 
+                                                 thin=thin))
+
+
+```
+
+
+```{r}
+#write out results
+#docs to topics
+ldaOut.topics <- as.matrix(topics(ldaOut))
+table(c(1:k, ldaOut.topics))
+#write.csv(ldaOut.topics,file=paste("../out/LDAGibbs",k,"DocsToTopics.csv"))
+
+#top 6 terms in each topic
+ldaOut.terms <- as.matrix(terms(ldaOut,20))
+#write.csv(ldaOut.terms,file=paste("../out/LDAGibbs",k,"TopicsToTerms.csv"))
+
+#probabilities associated with each topic assignment
+topicProbabilities <- as.data.frame(ldaOut@gamma)
+#write.csv(topicProbabilities,file=paste("../out/LDAGibbs",k,"TopicProbabilities.csv"))
+```
+
+
+```{r}
+terms.beta=ldaOut@beta
+terms.beta=scale(terms.beta)
+topics.terms=NULL
+for(i in 1:k){
+  topics.terms=rbind(topics.terms, ldaOut@terms[order(terms.beta[i,], decreasing = TRUE)[1:7]])
+}
+topics.terms
+ldaOut.terms
+```
+```{r}
+
+freq <- sort(colSums(as.matrix(dtm)))
+
+wf <- data.frame(word=names(freq),freq=freq)
+
+freq2 <- colSums(as.matrix(dtm))
+
+p_e <- ggplot(subset(tail(wf,20),freq>50),aes(word,freq))
+p_e <- p_e+geom_bar(stat = "identity")
+p_e <- p_e+theme(axis.text.x = element_text(angle = 45,hjust = 1,size = 10))
+p_e
+
+```
+
+The most common words that extroverted president used during an economic recession.
+
+
+
+
+
