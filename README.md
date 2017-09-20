@@ -3,7 +3,7 @@
 
 
 
-##Project Description
+## Project Description
 This is the first and only *individual* (as opposed to *team*) this semester. 
 
 Term: Fall 2017
@@ -13,7 +13,7 @@ Term: Fall 2017
 
 + Project summary: This project is to study the number of the words, the style of the speech and the positive/negative emotion used between extroverted and introverted presidents. Finally, summarize the most often used words by extroverted presidents using topic modeling.
 
-##What words can Presidents’ personality tell us?
+## What words can Presidents’ personality tell us?
 
 First, let’s calculate extroverted v.s. introverted total sentenses, total words, and average words per sentenses.
 
@@ -36,7 +36,7 @@ We notice that the sentences in inaugural speeches are longer than those in nomi
 We notice that there are only one sentenses that are longer than 100 words in introverted presidents’ speeches, but there are few sentenses that are longer than 100 words in extrovered presidents’ speeches.
 
 
-##What words did extroverted/introverted Presidents say?
+## What words did extroverted/introverted Presidents say?
 
 Let’s compare some famous extroverted and introverted presidents’ words. Do you think an extroverted president is more likely to use positive emotion words, and an introverted president is more likely to use rational or negative emotion words?
 
